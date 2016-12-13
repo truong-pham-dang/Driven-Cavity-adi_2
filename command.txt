@@ -1,0 +1,11 @@
+gnuplot> set size square
+gnuplot> unset title
+gnuplot> set pm3d map
+gnuplot> splot 'out.txt' u 1:2:3
+gnuplot> set term png
+Terminal type set to 'png'
+Options are 'nocrop font "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf,12" fontscale 1.0 size 640,480 '
+gnuplot> set output "result.png"
+gnuplot> replot
+smooth palette in png: using 160 of 160 available color positions
+
