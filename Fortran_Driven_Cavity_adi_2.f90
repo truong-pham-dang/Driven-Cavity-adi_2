@@ -21,7 +21,7 @@
 !     Developer: DANG Truong
       
       program main
-      
+      !$ use omp_lib
       implicit none
       
       integer, parameter :: dp = SELECTED_REAL_KIND(15,307)
@@ -37,6 +37,8 @@
       
       real(dp) :: time_start, time_finish
       
+      real(dp) :: time_start_omp, time_finish_omp
+      
       real(dp) :: alpha, dt
       
       real(dp) :: residual_1_s_B, residual_1_v_B, residual_1_v_A, residual_2_s_A
@@ -45,6 +47,10 @@
       
       integer :: k, i, j
       integer :: iteration
+      
+      integer, parameter :: nthreads = 2
+      
+      CALL OMP_SET_NUM_THREADS(nthreads)
 
 
        Re=1000.d0
@@ -65,6 +71,7 @@
 !     residual_3 is indeterminate. In order to avoid this, instead of using 
 !     exactly zero initial values, at interior points use very very small 
 !     numbers that could be considered as zero.
+      
       do k=0,N
       do j=0,N
        s(k,j)=1.d-32
@@ -79,25 +86,33 @@
        s(k,N)=0.d0
        v(k,N)=0.d0
       enddo 
+      
 
 !     Record the CPU time at start
        call cpu_time(time_start)
+       
+       time_start_omp = omp_get_wtime()
 
 !     Start the iterations
       do iteration=1,1000000
 
 !     Update old variables
+      !$omp parallel 
       do i=1,N-1
       do j=1,N-1
        s_old(i,j)=s(i,j)
        v_old(i,j)=v(i,j)
       enddo 
       enddo 
+      !$omp end parallel
+      
+      
 
 !     SOLVE THE STREAMFUNCTION EQUATION        
 
 !     Implicit in x-direction
 !     Calculate the RHS
+      
       do i=1,N-1
       do j=1,N-1
        rhs1(i,j)=s(i,j) + 0.5d0*dt*(s(i,j-1)-2.d0*s(i,j)+s(i,j+1))/dh**2. + 0.5d0*dt*v(i,j)        
@@ -344,15 +359,18 @@
       enddo 
       
 !     Record the CPU time at finish
- 1000 call cpu_time(time_finish)
+1000 call cpu_time(time_finish)
+     time_finish_omp = omp_get_wtime()
 
        write(*,*) ' '
        write(*,*) 'Convergence is achieved in',iteration,'   iterations'
        write(*,*) 'CPU time=',time_finish-time_start
+       write(*,*) 'OpenMP time =',time_finish_omp - time_start_omp
        
        open(2, file ='stat.txt', status = 'replace')
        write(2,*) 'Convergence is achieved in',iteration,'   iterations'
        write(2,*) 'CPU time=',time_finish-time_start
+       write(2,*) 'OpenMP time =',time_finish_omp - time_start_omp
        close(2)
 
 !     Output to a file        
