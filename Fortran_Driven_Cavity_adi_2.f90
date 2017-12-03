@@ -18,6 +18,8 @@
     
 !     Updated:   27/11/2017
 !     Purpose:   Porting from FORTRAN 77 to Fortran 90
+!     Updated:   03/12/2017
+!     Purpose:   Adding OpenMP directives
 !     Developer: DANG Truong
       
       program main
@@ -48,7 +50,7 @@
       integer :: k, i, j
       integer :: iteration
       
-      integer, parameter :: nthreads = 2
+      integer, parameter :: nthreads = 1
       
       CALL OMP_SET_NUM_THREADS(nthreads)
 
@@ -98,12 +100,14 @@
 
 !     Update old variables
       !$omp parallel 
+      !$omp do
       do i=1,N-1
       do j=1,N-1
        s_old(i,j)=s(i,j)
        v_old(i,j)=v(i,j)
       enddo 
       enddo 
+      !$omp end do
       !$omp end parallel
       
       
@@ -112,60 +116,88 @@
 
 !     Implicit in x-direction
 !     Calculate the RHS
-      
+    
+      !$omp parallel private(i,j), shared(dt,dh)
+      !$omp do
       do i=1,N-1
       do j=1,N-1
        rhs1(i,j)=s(i,j) + 0.5d0*dt*(s(i,j-1)-2.d0*s(i,j)+s(i,j+1))/dh**2. + 0.5d0*dt*v(i,j)        
       enddo 
       enddo 
+      !$omp end do
+      !$omp end parallel
 
       do j=1,N-1
+      !$omp parallel private(i), shared(dt,dh)
+      !$omp do
       do i=1,N-1
        aa(i)=-0.5d0*dt/dh**2.
        bb(i)=1.d0+0.5d0*dt*2.d0/dh**2.
        cc(i)=-0.5d0*dt/dh**2.
        dd(i)=rhs1(i,j)
-      enddo 
+      enddo
+      !$omp end do
+      !$omp end parallel
 
 !     Note: s(0,j)=0 and s(N,j)=0
 !     Forward elimination
+      !$omp parallel 
+      !$omp do
       do i=2,N-1
        bb(i)=bb(i)-aa(i)*cc(i-1)/bb(i-1)
        dd(i)=dd(i)-aa(i)*dd(i-1)/bb(i-1)
       enddo 
+      !$omp end do
+      !$omp end parallel
 
 !     Substitute for the last point
        s(N-1,j)=dd(N-1)/bb(N-1)
 
 !     Backward substitution
+      !$omp parallel 
+      !$omp do
       do i=N-2,1,-1
        s(i,j)=(dd(i)-s(i+1,j)*cc(i))/bb(i)
       enddo 
+      !$omp end do
+      !$omp end parallel
       
       enddo 
 
 !     Implicit in y-direction
 !     Calculate the RHS
-      do i=1,N-1
+      !$omp parallel private(i,j), shared(dt,dh)
+      !$omp do
+      do i=1,N-1 
       do j=1,N-1
        rhs2(i,j)=s(i,j) + 0.5d0*dt*(s(i-1,j)-2.d0*s(i,j)+s(i+1,j))/dh**2. +0.5d0*dt*v(i,j)        
       enddo 
-      enddo 
+      enddo
+      !$omp end do
+      !$omp end parallel
 
       do i=1,N-1
+      !$omp parallel private(j), shared(dt,dh)
+      !$omp do
       do j=1,N-1
        aa(j)=-0.5d0*dt/dh**2.
        bb(j)=1.d0+0.5d0*dt*2.d0/dh**2.
        cc(j)=-0.5d0*dt/dh**2.
        dd(j)=rhs2(i,j)
       enddo 
+      !$omp end do
+      !$omp end parallel
 
 !     Note: s(i,0)=0 and s(i,N)=0
 !     Forward elimination
+      !$omp parallel 
+      !$omp do
       do j=2,N-1
        bb(j)=bb(j)-aa(j)*cc(j-1)/bb(j-1)
        dd(j)=dd(j)-aa(j)*dd(j-1)/bb(j-1)
       enddo 
+      !$omp end do
+      !$omp end parallel
 
 !     Substitute for the last point
        s(i,N-1)=dd(N-1)/bb(N-1)
@@ -351,6 +383,12 @@
        write(*,*) residual_1_s_A,residual_1_v_A
        write(*,*) residual_2_s_A,residual_2_v_A
        write(*,*) residual_3_s_A,residual_3_v_A
+       
+!     Write result file
+       if (mod(iteration, 1000) == 0) then 
+        call show_vtk 
+       endif
+       
 !     condition to stop iterations
        if((residual_1_s_A.lt.1.d-6).AND.(residual_1_v_A.lt.1.d-6)) then
         goto 1000
@@ -382,7 +420,53 @@
       enddo 
       close(1)
       
- 2222 format(f,x,f,x,es,x,es)
+      call show_vtk
+      
+2222  format(f,x,f,x,es,x,es)
+      
 
       stop
-      end
+      
+    contains
+      subroutine show_vtk
+      implicit none
+      integer :: i, j 
+      character(10) :: citer
+      
+      write(citer,'(I10.10)') iteration
+      
+      open(unit = 3, file = 'res_'//trim(citer)//'.vtk', status ='replace')
+      write(3,'(1A26)') '# vtk DataFile Version 2.0'
+      write(3,'(A)') 'driven cavity 2D'
+      write(3,'(A)') 'ASCII'
+      write(3,'(A)') 'DATASET STRUCTURED_GRID'
+      write(3,100) N+1,N+1,1
+      write(3,200) (N+1)*(N+1)
+      do j=0,N
+        do i=0,N
+            write(3,*) x(i),y(j),0.0d0
+        end do
+      end do
+      write(3,*) 'CELL_DATA',N*N
+      write(3,'(A)') 'SCALARS streanfunction float'
+      write(3,'(A)') 'LOOKUP_TABLE default'
+      do j=1,N
+        do i=1,N
+            write(3,*) s(i,j)
+        end do
+      end do
+      write(3,'(A)') 'SCALARS vorticity float'
+      write(3,'(A)') 'LOOKUP_TABLE default'
+      do j=1,N
+        do i=1,N
+            write(3,*) v(i,j)
+        end do
+      end do 
+      close(3)
+      
+100 format('DIMENSIONS ',3I9)
+200 format('POINTS ',I9,' float') 
+    
+      end subroutine show_vtk
+      
+      end program
